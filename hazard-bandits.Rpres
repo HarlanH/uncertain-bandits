@@ -1,0 +1,241 @@
+Bandit Optimization with Uncertain, Delayed Feedback
+========================================================
+author: Harlan D. Harris, PhD
+date: August 20th, 2015
+
+```{r setup, echo=FALSE}
+library(ggplot2)
+library(mgcv)
+```
+
+Typical Bandit Optimization
+===========================
+
+<div align="center">
+<img src="online.png" width=800 >
+</div>
+
+Batch Bandit Optimization
+=========================
+
+<div align="center">
+<img src="batch.png" width=800 >
+</div>
+
+Real Life
+=========
+
+<div align="center">
+<img src="reallife.png" width=900 >
+</div>
+
+Simulation
+==========
+left:75%
+
+Seen purchase yet? Depends on time since intervention, A/B, and seasonality!
+
+<small>
+```{r model}
+purch_time <- function(t,  intervention) {
+    prob <- .5 * 
+        # seasonality
+        (dnorm(t, mean=50, sd=20) 
+           *20+1) * 
+        # intervention
+        ifelse(intervention=='A', 1.4, 1) 
+    ifelse(runif(length(intervention)) < prob,
+        rnbinom(length(intervention), size=1, prob=.05),
+        Inf)
+}
+```
+</small>
+```{r test_purch_time, echo=FALSE}
+ret <- purch_time(20, c('A', 'B', 'A', 'B', 'A'))
+stopifnot(length(ret) == 5, all(ret > 0))
+```
+
+***
+```{r norm, echo=FALSE, message=FALSE, fig.width=3, fig.height=3}
+ggplot(data.frame(x=1:100, y=dnorm(1:100, mean=50, sd=20)*20+1),
+       aes(x=x,y=y)) +
+    geom_line(size=2) + 
+    ylim(0, 1.5) +
+    labs(x="Absolute Time", y="Density", title="Seasonality") + 
+    theme_minimal()
+
+```
+
+```{r nbinom, echo=FALSE, fig.width=3, fig.height=3}
+ggplot(data.frame(x=1:100, y=dnbinom(1:100, size=1, prob=.05)),
+       aes(x=x,y=y)) +
+    geom_line(size=2) + 
+    ylim(0,.05) +
+    labs(x="Time Past Intervention", y="Density", title="Purchase Time") + 
+    theme_minimal()
+
+```
+
+Every Tick -- Simulate the World
+=============
+
+* Add $N$ more leads, apply $A$ and $B$ treatments per policy
+* Calculate purchase time 
+
+Every 20 Ticks -- Update the Policy
+========================================================
+
+* Count observed purchases to date
+* Fit a model
+* Estimate $\beta_{A>B}$, treatment effect
+* Compute $P(A > B)$, treatment odds ratio
+* Set $P(A) = P(A > B)$ (_Probability Matching_)
+* Profit...
+
+Model to fit:
+```{r formula, eval=FALSE}
+purchase ~ interventionAvsB + 
+    s(interv_time) + 
+    s(elapsed_time)
+```
+
+GAMs and Time
+=============
+
+* $P(\text{doing this wrong}) \approx 1$
+* Generalized Additive Models 
+  * Kim Larson -- [The Predictive Modeling Silver Bullet](http://multithreaded.stitchfix.com/blog/2015/07/30/gam/)
+* logistic regression _with splines_
+* vs Survival approach?
+* Care about $\beta_{A>B}$
+
+Try It!
+======
+
+* $N=5$ leads/tick, repeated simulations
+* Initially, $P(A) = 0.5$
+* Watch $\beta_{A>B}$ and $P(A > B)$ change
+* Inspect other coefficients
+
+```{r simulation}
+# map from linear space to 0-1 space
+logit <- binomial()$linkinv
+
+BetterLikelihood <- function(tbl, groupcol="treatmentA", testgroup=1, n=1e6) {
+  testrow <- tbl[,groupcol]==testgroup
+  test_uptakes <- logit(rnorm(n, 
+                              tbl[testrow,'fit'], 
+                              tbl[testrow,'se']))
+  ctrl_uptakes <- logit(rnorm(n, 
+                              tbl[!testrow,'fit'], 
+                              tbl[!testrow,'se']))
+  mean((rbinom(n, tbl[ testrow,'n'], test_uptakes)/tbl[ testrow,'n']) > 
+       (rbinom(n, tbl[!testrow,'n'], ctrl_uptakes)/tbl[!testrow,'n']))
+
+}
+
+BuildTable <- function(model, dat) {
+    grid <- expand.grid(elapsed_time=30, treatmentA=c(1,0))
+    pred <- predict(model, grid, type='link', se.fit=TRUE)
+    ret <- with(pred, cbind(grid,
+                   uptake=logit(fit), 
+                   fit=fit, se=se.fit,
+                   n=c(sum(dat$treatmentA==1), sum(dat$treatmentA==0)),
+                   act_purchs=c(sum(with(dat, treatmentA==1 & purchased=='PURCH')),
+                                 sum(with(dat, treatmentA==0 & purchased=='PURCH'))),
+                   ci_lower=logit(fit-2*se.fit), ci_upper=logit(fit+2*se.fit)))
+    cbind(ret, helps=BetterLikelihood(ret))
+}
+
+N = 3
+PA0 = 0.5; PA = PA0
+leads = data.frame(t=numeric(0), purch_at=numeric(0), treatment=character(0))
+fits = list(); results = list()
+for (tick in 1:100) {
+    # compute this step of the world
+    treatments <- ifelse(runif(N) < PA, 'A', 'B')
+    purch_ats <- purch_time(N, treatments) + tick
+    leads <- rbind(leads,
+                   data.frame(t=tick, purch_at = purch_ats, treatment = treatments,
+                              PA = PA))
+    if (tick %% 20 == 0) {
+        model_dat <- with(leads,
+                          data.frame(purchased = ifelse(purch_at <= tick, "PURCH", "no purch"),
+                                     treatmentA = as.numeric(treatment == 'A'),
+                                     interv_time = t,
+                                     elapsed_time = tick - t
+                                     ))
+        
+        fit <- gam(purchased ~ treatmentA + s(elapsed_time),
+                   family=binomial, data=model_dat)
+        fits[[length(fits) + 1]] <- fit       
+        
+        # build table
+        res_table <- BuildTable(fit, model_dat)
+        results[[length(results) + 1]] <- cbind(res_table, tick=tick)
+        PA <- res_table$helps[[1]]
+    }
+}
+```
+
+Coefficients
+============
+
+After 40 ticks
+
+```{r coef_plots}
+plot(fits[[2]])
+```
+
+Uptake Over Time
+================
+
+Estimates of purchase probability with each treatment
+
+```{r uptake_plot}
+all_results <- do.call(rbind, results)
+
+ggplot(all_results, aes(tick, uptake, ymin=ci_lower, ymax=ci_upper, 
+                        color=ifelse(treatmentA,"A","B"), group=treatmentA)) + 
+    geom_line(size=3) + 
+    geom_errorbar() + 
+    scale_color_manual(values=c("red", "black")) +
+    ylim(0,1) +
+    scale_x_continuous(breaks=(0:5)*20) +
+    labs(x="Tick", y="Estimated Purchase Prob in 30 Ticks",
+         color="Treatment") +
+    theme_minimal()
+
+```
+
+
+$P(A>B)$ Over Time
+==================
+
+Estimates that A is better == Probability of choosing A
+
+```{r a_better_plot}
+
+ggplot(subset(all_results, treatmentA==1), aes(tick, helps)) +
+    geom_line(size=3) + 
+    ylim(0,1) +
+    scale_x_continuous(breaks=(0:5)*20) +
+    labs(x="Tick", y="Estimated P(A > B)") +
+    theme_minimal()
+
+```
+
+
+Thanks
+======
+
+@harlanh
+
+link to this presentation
+
+Details
+=======
+
+* Predict purchase probability 30 ticks out, for A and B
+* Use SE to determine confidence intervals
+* Simulate to estimate $P(A > B)$
