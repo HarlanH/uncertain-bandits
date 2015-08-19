@@ -4,6 +4,7 @@ author: Harlan D. Harris, PhD
 date: August 20th, 2015
 
 ```{r setup, echo=FALSE}
+set.seed(2)
 library(ggplot2)
 library(mgcv)
 ```
@@ -37,16 +38,15 @@ Seen purchase yet? Depends on time since intervention, A/B, and seasonality!
 
 <small>
 ```{r model}
-purch_time <- function(t,  intervention) {
-    prob <- .5 * 
-        # seasonality
-        (dnorm(t, mean=50, sd=20) 
-           *20+1) * 
-        # intervention
-        ifelse(intervention=='A', 1.4, 1) 
-    ifelse(runif(length(intervention)) < prob,
-        rnbinom(length(intervention), size=1, prob=.05),
-        Inf)
+purch_time <- function(t, intv) {
+  prob <- .5 * 
+    # seasonality
+    (dnorm(t, mean=50, sd=20)*20+1) * 
+    # intervention
+    ifelse(intv=='A', 1.4, 1) 
+  ifelse(runif(length(intv)) < prob,
+    rnbinom(length(intv), size=1, prob=.05),
+    Inf)
 }
 ```
 </small>
@@ -117,7 +117,7 @@ Try It!
 * Watch $\beta_{A>B}$ and $P(A > B)$ change
 * Inspect other coefficients
 
-```{r simulation}
+```{r simulation, echo=FALSE}
 # map from linear space to 0-1 space
 logit <- binomial()$linkinv
 
@@ -135,7 +135,7 @@ BetterLikelihood <- function(tbl, groupcol="treatmentA", testgroup=1, n=1e6) {
 }
 
 BuildTable <- function(model, dat) {
-    grid <- expand.grid(elapsed_time=30, treatmentA=c(1,0))
+    grid <- expand.grid(elapsed_time=30, interv_time=0, treatmentA=c(1,0))
     pred <- predict(model, grid, type='link', se.fit=TRUE)
     ret <- with(pred, cbind(grid,
                    uptake=logit(fit), 
@@ -147,7 +147,7 @@ BuildTable <- function(model, dat) {
     cbind(ret, helps=BetterLikelihood(ret))
 }
 
-N = 3
+N = 10
 PA0 = 0.5; PA = PA0
 leads = data.frame(t=numeric(0), purch_at=numeric(0), treatment=character(0))
 fits = list(); results = list()
@@ -166,7 +166,7 @@ for (tick in 1:100) {
                                      elapsed_time = tick - t
                                      ))
         
-        fit <- gam(purchased ~ treatmentA + s(elapsed_time),
+        fit <- gam(purchased ~ treatmentA + s(elapsed_time) ,
                    family=binomial, data=model_dat)
         fits[[length(fits) + 1]] <- fit       
         
@@ -178,60 +178,77 @@ for (tick in 1:100) {
 }
 ```
 
-Coefficients
+Coefficients After 40 Ticks
 ============
 
-After 40 ticks
+<small>
+* Intercept: `r format(coef(fits[[2]])[[1]], digits=3)`
+* $\beta_{A>B}$: `r format(coef(fits[[2]])[[2]], digits=3)`
+</small>
 
-```{r coef_plots}
-plot(fits[[2]])
+```{r coef_plots, echo=FALSE, fig.height=10, fig.width=10}
+#par(cex=3, lwd=3, mar=c(5,4,1,2)+.1)
+#plot(fits[[4]], select=1)
+```
+
+***
+
+```{r coef_plots2, echo=FALSE, fig.height=10, fig.width=10}
+par(cex=3, lwd=3, mar=c(5,4,1,2)+.1)
+plot(fits[[2]], select=1)
 ```
 
 Uptake Over Time
 ================
 
-Estimates of purchase probability with each treatment
+Estimates of purchase probability (in 30 ticks) with each treatment
 
-```{r uptake_plot}
+```{r uptake_plot, echo=FALSE, fig.height=5, fig.width=8, dpi=200, out.width=800, out.height=500}
 all_results <- do.call(rbind, results)
 
 ggplot(all_results, aes(tick, uptake, ymin=ci_lower, ymax=ci_upper, 
-                        color=ifelse(treatmentA,"A","B"), group=treatmentA)) + 
+                        color=ifelse(treatmentA,"A","B"), 
+                        fill=ifelse(treatmentA,"A","B"),
+                        group=treatmentA)) + 
     geom_line(size=3) + 
-    geom_errorbar() + 
+    geom_ribbon(alpha=.3, size=0) + 
     scale_color_manual(values=c("red", "black")) +
+    scale_fill_manual(values=c("red", "black")) +
     ylim(0,1) +
     scale_x_continuous(breaks=(0:5)*20) +
-    labs(x="Tick", y="Estimated Purchase Prob in 30 Ticks",
+    labs(x="Tick", y="Est Purch Prob",
          color="Treatment") +
-    theme_minimal()
+    guides(fill="none") + 
+    theme_minimal(base_size=30)
 
 ```
 
 
-$P(A>B)$ Over Time
+P(A>B) Over Time
 ==================
 
 Estimates that A is better == Probability of choosing A
 
-```{r a_better_plot}
+```{r a_better_plot, echo=FALSE, fig.height=5, fig.width=8, dpi=200, out.width=800, out.height=500}
 
 ggplot(subset(all_results, treatmentA==1), aes(tick, helps)) +
     geom_line(size=3) + 
     ylim(0,1) +
     scale_x_continuous(breaks=(0:5)*20) +
     labs(x="Tick", y="Estimated P(A > B)") +
-    theme_minimal()
+    theme_minimal(base_size=30)
 
 ```
 
 
-Thanks
+Thanks!
 ======
 
-@harlanh
-
+<div style="margin-top:200px; text-align:center">
+Twitter: <a href="http://twitter.com/harlanh">@harlanh</a>
+<br><br><br>
 link to this presentation
+</div>
 
 Details
 =======
