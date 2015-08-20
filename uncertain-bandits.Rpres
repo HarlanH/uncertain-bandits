@@ -34,7 +34,7 @@ Simulation
 ==========
 left:75%
 
-Seen purchase yet? Depends on time since intervention, A/B, and seasonality!
+Seen purchase yet? Depends on time since intervention, A/B, and maybe seasonality!
 
 <small>
 ```{r model}
@@ -87,16 +87,14 @@ Every 20 Ticks -- Update the Policy
 
 * Count observed purchases to date
 * Fit a model
-* Estimate $\beta_{A>B}$, treatment effect
+* Estimate $\beta_{A>B} = \hat{\mu}_A - \hat{\mu}_B$, treatment effect
 * Compute $P(A > B)$, treatment odds ratio
 * Set $P(A) = P(A > B)$ (_Probability Matching_)
 * Profit...
 
-Model to fit:
+Model to fit (incomplete!):
 ```{r formula, eval=FALSE}
-purchase ~ interventionAvsB + 
-    s(interv_time) + 
-    s(elapsed_time)
+purchase ~ interventionAvsB + s(elapsed_time)
 ```
 
 GAMs and Time
@@ -106,7 +104,8 @@ GAMs and Time
 * Generalized Additive Models 
   * Kim Larson -- [The Predictive Modeling Silver Bullet](http://multithreaded.stitchfix.com/blog/2015/07/30/gam/)
 * logistic regression _with splines_
-* vs Survival approach?
+* penalized spline complexity
+* Survival approach?
 * Care about $\beta_{A>B}$
 
 Try It!
@@ -246,13 +245,15 @@ Thanks!
 
 <div style="margin-top:200px; text-align:center">
 Twitter: <a href="http://twitter.com/harlanh">@harlanh</a>
-<br><br><br>
-link to this presentation
+<br><br>
+Presentation: <a href="http://rpubs.com/HarlanH/uncertain-bandits">http://rpubs.com/HarlanH/uncertain-bandits</a>
+<br><br>
+Source: <a href="https://github.com/HarlanH/uncertain-bandits">https://github.com/HarlanH/uncertain-bandits</a>
 </div>
 
 Details
 =======
 
 * Predict purchase probability 30 ticks out, for A and B
-* Use SE to determine confidence intervals
-* Simulate to estimate $P(A > B)$
+* Use Standard Error of predictions to determine confidence intervals
+* Simulate many draws to estimate $P(A > B)$
